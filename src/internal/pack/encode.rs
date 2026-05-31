@@ -348,8 +348,8 @@ impl PackEncoder {
         enable_zstdelta: bool,
     ) -> Result<(), GitError> {
         let head = encode_header(self.object_number);
-        self.send_data(head.clone()).await;
         self.inner_hash.update(&head);
+        self.send_data(head).await;
 
         // ensure only one decode can only invoke once
         if self.start_encoding {
@@ -448,7 +448,7 @@ impl PackEncoder {
 
         let mut all_res = vec![commit_res, tree_res, blob_res, tag_res];
 
-        let mut idx_entries = Vec::new();
+        let mut idx_entries = Vec::with_capacity(self.object_number);
         for res in &mut all_res {
             for data in res {
                 data.1.offset = self.inner_offset as u64;
@@ -746,7 +746,7 @@ impl PackEncoder {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Cursor, path::PathBuf, sync::Arc, time::Instant};
+    use std::{env, io::Cursor, path::PathBuf, sync::Arc, time::Instant};
 
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -756,12 +756,7 @@ mod tests {
         hash::{HashKind, ObjectHash, set_hash_kind_for_test},
         internal::{
             object::{blob::Blob, types::ObjectType},
-            pack::{
-                Pack,
-                test_pack_download::{PackFileGuard, download_pack_file},
-                tests::init_logger,
-                utils::read_offset_encoding,
-            },
+            pack::{Pack, tests::init_logger, utils::read_offset_encoding},
         },
         time_it,
     };
@@ -926,8 +921,9 @@ mod tests {
         assert!(matches!(err, GitError::PackEncodeError(_)));
     }
 
-    async fn get_entries_for_test() -> (Arc<Mutex<Vec<Entry>>>, PackFileGuard) {
-        let (source, dl_guard) = download_pack_file("encode-test-sha1.pack");
+    async fn get_entries_for_test() -> Arc<Mutex<Vec<Entry>>> {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/packs/encode-test-sha1.pack");
 
         let mut p = Pack::new(None, None, Some(PathBuf::from("/tmp/.cache_temp")), true);
 
@@ -949,10 +945,11 @@ mod tests {
         tracing::info!("total entries: {}", p.number);
         drop(p);
 
-        (entries, dl_guard)
+        entries
     }
-    async fn get_entries_for_test_sha256() -> (Arc<Mutex<Vec<Entry>>>, PackFileGuard) {
-        let (source, dl_guard) = download_pack_file("encode-test-sha256.pack");
+    async fn get_entries_for_test_sha256() -> Arc<Mutex<Vec<Entry>>> {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/packs/encode-test-sha256.pack");
 
         let mut p = Pack::new(None, None, Some(PathBuf::from("/tmp/.cache_temp")), true);
 
@@ -974,7 +971,7 @@ mod tests {
         tracing::info!("total entries: {}", p.number);
         drop(p);
 
-        (entries, dl_guard)
+        entries
     }
 
     #[tokio::test]
@@ -983,7 +980,7 @@ mod tests {
         init_logger();
 
         let start = Instant::now();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1046,7 +1043,7 @@ mod tests {
 
         let start = Instant::now();
         // use sha256 pack file for testing
-        let (entries, _dl_guard) = get_entries_for_test_sha256().await;
+        let entries = get_entries_for_test_sha256().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1104,7 +1101,7 @@ mod tests {
     async fn test_pack_encoder_large_file() {
         let _guard = set_hash_kind_for_test(HashKind::Sha1);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1173,7 +1170,7 @@ mod tests {
     async fn test_pack_encoder_large_file_sha256() {
         let _guard = set_hash_kind_for_test(HashKind::Sha256);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test_sha256().await;
+        let entries = get_entries_for_test_sha256().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1243,7 +1240,7 @@ mod tests {
     async fn test_pack_encoder_with_zstdelta() {
         let _guard = set_hash_kind_for_test(HashKind::Sha1);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1305,7 +1302,7 @@ mod tests {
     async fn test_pack_encoder_with_zstdelta_sha256() {
         let _guard = set_hash_kind_for_test(HashKind::Sha256);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test_sha256().await;
+        let entries = get_entries_for_test_sha256().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1381,7 +1378,7 @@ mod tests {
     async fn test_pack_encoder_large_file_with_delta() {
         let _guard = set_hash_kind_for_test(HashKind::Sha1);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1444,7 +1441,7 @@ mod tests {
     async fn test_pack_encoder_large_file_with_delta_sha256() {
         let _guard = set_hash_kind_for_test(HashKind::Sha256);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test_sha256().await;
+        let entries = get_entries_for_test_sha256().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1508,7 +1505,7 @@ mod tests {
     async fn test_pack_encoder_output_to_files() {
         let _guard = set_hash_kind_for_test(HashKind::Sha1);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1576,7 +1573,7 @@ mod tests {
     async fn test_pack_encoder_output_to_files_with_delta() {
         let _guard = set_hash_kind_for_test(HashKind::Sha1);
         init_logger();
-        let (entries, _dl_guard) = get_entries_for_test().await;
+        let entries = get_entries_for_test().await;
         let entries_number = entries.lock().await.len();
 
         let total_original_size: usize = entries
@@ -1638,5 +1635,80 @@ mod tests {
         let duration = start.elapsed();
         tracing::info!("test executed in: {:.2?}", duration);
         tracing::info!("original total size: {}", total_original_size);
+    }
+
+    #[tokio::test]
+    async fn test_idx_entries_preallocation() {
+        use crate::internal::metadata::{EntryMeta, MetaAttached};
+        use crate::internal::object::blob::Blob;
+        use crate::internal::pack::entry::Entry;
+        use tokio::sync::mpsc;
+
+        let (data_tx, mut data_rx) = mpsc::channel::<Vec<u8>>(100);
+        let (entry_tx, entry_rx) = mpsc::channel(10);
+
+        let contents = vec!["a", "b", "c"];
+        for &content in &contents {
+            let blob = Blob::from_content(content);
+            let entry: Entry = blob.into();
+            entry_tx
+                .send(MetaAttached {
+                    inner: entry,
+                    meta: EntryMeta::new(),
+                })
+                .await
+                .unwrap();
+        }
+        drop(entry_tx);
+
+        let mut encoder = PackEncoder::new(3, 10, data_tx);
+        encoder.inner_encode(entry_rx, false).await.unwrap();
+
+        let idx = encoder.idx_entries.expect("idx_entries should be set");
+        assert_eq!(idx.len(), 3);
+
+        let mut received = Vec::new();
+        while let Ok(chunk) = data_rx.try_recv() {
+            received.extend(chunk);
+        }
+        assert!(!received.is_empty(), "Encoder should output some data");
+    }
+
+    #[tokio::test]
+    async fn test_no_head_clone_consistency() {
+        use crate::internal::metadata::{EntryMeta, MetaAttached};
+        use crate::internal::object::blob::Blob;
+        use crate::internal::pack::entry::Entry;
+        use tokio::sync::mpsc;
+
+        let (data_tx, mut data_rx) = mpsc::channel::<Vec<u8>>(100);
+        let (entry_tx, entry_rx) = mpsc::channel(10);
+
+        let contents = vec!["hello", "world"];
+        for &content in &contents {
+            let blob = Blob::from_content(content);
+            let entry: Entry = blob.into();
+            entry_tx
+                .send(MetaAttached {
+                    inner: entry,
+                    meta: EntryMeta::new(),
+                })
+                .await
+                .unwrap();
+        }
+        drop(entry_tx);
+
+        let mut encoder = PackEncoder::new(2, 10, data_tx);
+        encoder.encode(entry_rx).await.unwrap();
+
+        let _hash = encoder.final_hash.expect("final hash should be computed");
+        let mut received = Vec::new();
+        while let Ok(chunk) = data_rx.try_recv() {
+            received.extend(chunk);
+        }
+        assert!(
+            received.starts_with(b"PACK"), 
+            "Pack output should start with PACK magic"
+        );
     }
 }
